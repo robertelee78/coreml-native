@@ -9,7 +9,28 @@ const MODEL_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/te
 #[cfg(target_vendor = "apple")]
 mod inference {
     use super::MODEL_PATH;
-    use coreml_native::{BorrowedTensor, ComputeUnits, Model};
+    use coreml_native::{AsMultiArray, BatchProvider, BorrowedTensor, ComputeUnits, Model};
+
+    #[test]
+    fn repeated_batch_predictions_release_autoreleased_outputs() {
+        let model = Model::load(MODEL_PATH, ComputeUnits::All).expect("failed to load test model");
+        let input_data = vec![1.0f32, 2.0, 3.0, 4.0];
+        let tensor = BorrowedTensor::from_f32(&input_data, &[1, 4]).unwrap();
+        let input = [("input", &tensor as &dyn AsMultiArray)];
+        let inputs = vec![input.as_slice(); 128];
+
+        // CoreML limits each process to 16,384 live IOSurfaces. Without an
+        // autorelease pool in predict_batch(), one output surface per item
+        // remains live and the 129th batch raises an Objective-C exception.
+        for _ in 0..129 {
+            let batch = BatchProvider::new(&inputs).unwrap();
+            let predictions = model.predict_batch(&batch).unwrap();
+            assert_eq!(predictions.count(), inputs.len());
+            let (output, shape) = predictions.get_f32(inputs.len() - 1, "output").unwrap();
+            assert_eq!(shape, vec![1, 4]);
+            assert!((output[0] - 3.0).abs() < 0.01);
+        }
+    }
 
     #[test]
     fn predict_basic_linear() {

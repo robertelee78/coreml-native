@@ -275,13 +275,15 @@ impl Model {
     pub fn predict_batch(&self, batch: &batch::BatchProvider) -> Result<batch::BatchPrediction> {
         use objc2_core_ml::MLBatchProvider;
 
-        let batch_ref: &objc2::runtime::ProtocolObject<dyn MLBatchProvider> =
-            objc2::runtime::ProtocolObject::from_ref(&*batch.inner);
+        objc2::rc::autoreleasepool(|_pool| {
+            let batch_ref: &objc2::runtime::ProtocolObject<dyn MLBatchProvider> =
+                objc2::runtime::ProtocolObject::from_ref(&*batch.inner);
 
-        let result = unsafe { self.inner.predictionsFromBatch_error(batch_ref) }
-            .map_err(|e| Error::from_nserror(ErrorKind::Prediction, &e))?;
+            let result = unsafe { self.inner.predictionsFromBatch_error(batch_ref) }
+                .map_err(|e| Error::from_nserror(ErrorKind::Prediction, &e))?;
 
-        Ok(batch::BatchPrediction { inner: result })
+            Ok(batch::BatchPrediction { inner: result })
+        })
     }
 
     #[cfg(not(target_vendor = "apple"))]
